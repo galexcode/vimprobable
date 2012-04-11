@@ -24,8 +24,8 @@ static gboolean escape_input_on_load    = TRUE; /* TRUE will disable automatic f
 /* appearance */
 char statusbgcolor[MAX_SETTING_SIZE]    = "#000000";            /* background color for status bar */
 char statuscolor[MAX_SETTING_SIZE]      = "#ffffff";            /* color for status bar */
-char sslbgcolor[MAX_SETTING_SIZE]       = "#b0ff00";            /* background color for status bar with SSL url */
-char sslinvalidbgcolor[MAX_SETTING_SIZE]= "#ff0000";            /* background color for status bar with unverified SSL url */
+char sslbgcolor[MAX_SETTING_SIZE]       = "#95e454";            /* background color for status bar with SSL url */
+char sslinvalidbgcolor[MAX_SETTING_SIZE]= "#f08080";            /* background color for status bar with unverified SSL url */
 char sslcolor[MAX_SETTING_SIZE]         = "#000000";            /* color for status bar with SSL url */
 
                                         /*  normal,                 warning,                error       */
