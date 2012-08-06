@@ -10,7 +10,7 @@ function Hints() {
         maxAllowedHints: 500,
         hintCss: "z-index:100000;font-family:monospace;font-size:10px;"
                + "font-weight:bold;color:#000;background-color:#fff;"
-               + "padding:0px 1px;position:absolute;border:1px solid #444;opacity:0.8;",
+               + "padding:0px 1px;position:absolute;border:1px solid #444;opacity:0.7;",
         hintClass: "hinting_mode_hint",
         hintClassFocus: "hinting_mode_hint_focus",
         elemBackground: "#ff0",
@@ -89,8 +89,8 @@ function Hints() {
                 /* making this block DOM compliant */
                 var hint = hintSpan.cloneNode(false);
                 hint.setAttribute("id", "vimprobablehint" + hintCount);
-                hint.style.left = leftpos + "px";
-                hint.style.top =  toppos + "px";
+                hint.style.left = leftpos - 3 + "px";
+                hint.style.top =  toppos - 3 + "px";
                 text = doc.createTextNode(hintCount + 1);
                 hint.appendChild(text);
 
