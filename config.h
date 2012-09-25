@@ -14,11 +14,11 @@
 
 /* general settings */
 char startpage[MAX_SETTING_SIZE]      = "http://www.vimprobable.org/";
-char useragent[MAX_SETTING_SIZE]      = "Vimprobable2/" VERSION;
+char useragent[MAX_SETTING_SIZE]      = "Vimprobable2/" VERSION " (X11; Linux i686) AppleWebKit/535.22+ Compatible (Safari)";
 char acceptlanguage[MAX_SETTING_SIZE] = "";
 static const gboolean enablePlugins     = TRUE; /* TRUE keeps plugins enabled */
 static const gboolean enableJava        = TRUE; /* FALSE disables Java applets */
-static const gboolean enablePagecache   = FALSE; /* TRUE turns on the page cache. */
+static const gboolean enablePagecache   = TRUE; /* TRUE turns on the page cache. */
 static gboolean escape_input_on_load    = TRUE; /* TRUE will disable automatic focusing of input fields via Javascript*/
 
 /* appearance */
@@ -64,8 +64,10 @@ static const char progressborderright   = ']';
  *       "%s" will translate to "user@example.org"
  */
 static URIHandler uri_handlers[] = {
+    /*
     { "mailto:",          "x-terminal-emulator -e mutt %s" },
     { "ftp://",           "x-terminal-emulator -e wget ftp://%s" },
+    */
 };
 
 /* cookies */
@@ -101,14 +103,10 @@ gboolean complete_case_sensitive        = TRUE;
 
 /* search engines */
 static Searchengine searchengines[] = {
-    { "i",          "http://ixquick.com/do/metasearch.pl?query=%s" },
-    { "w",          "https://secure.wikimedia.org/wikipedia/en/w/index.php?title=Special%%3ASearch&search=%s&go=Go" },
-    { "wd",         "https://secure.wikimedia.org/wikipedia/de/w/index.php?title=Special%%3ASearch&search=%s&go=Go" },
-    { "d",          "https://duckduckgo.com/?q=%s&t=Vimprobable" },
-    { "dd",         "https://duckduckgo.com/html/?q=%s&t=Vimprobable" },
+    { "dl",         "https://duckduckgo.com/lite/?q=%s&t=Vimprobable" },
 };
 
-static char defaultsearch[MAX_SETTING_SIZE] = "i";
+static char defaultsearch[MAX_SETTING_SIZE] = "dl";
 
 /* command mapping */
 Command commands[COMMANDSIZE] = {
