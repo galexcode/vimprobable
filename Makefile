@@ -24,8 +24,6 @@ LDFLAGS += `pkg-config --libs $(LIBS)` -lX11 -lXext
 ifeq ($(V_DEBUG),1)
 CFLAGS += -g -ggdb -ansi -Wstrict-prototypes
 CFLAGS += -Wno-long-long -Wall -Wmissing-declarations
-else
-CFLAGS += -O3
 endif
 
 PREFIX ?= /usr/local
