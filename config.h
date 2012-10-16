@@ -9,7 +9,7 @@
 */
 
 /* Vimprobable version number */
-#define VERSION "1.1.0"
+#define VERSION "1.2.0"
 #define INTERNAL_VERSION "Vimprobable2/"VERSION
 
 /* general settings */
@@ -20,6 +20,7 @@ static const gboolean enablePlugins     = TRUE; /* TRUE keeps plugins enabled */
 static const gboolean enableJava        = TRUE; /* FALSE disables Java applets */
 static const gboolean enablePagecache   = TRUE; /* TRUE turns on the page cache. */
 static gboolean escape_input_on_load    = TRUE; /* TRUE will disable automatic focusing of input fields via Javascript*/
+char temp_dir[MAX_SETTING_SIZE]         = "/tmp"; /* location of temporary files, default will be overridden if TEMPDIR is set */
 
 /* appearance */
 char statusbgcolor[MAX_SETTING_SIZE]    = "#000000";            /* background color for status bar */
@@ -66,6 +67,7 @@ static const char progressborderright   = ']';
 static URIHandler uri_handlers[] = {
     /*
     { "mailto:",          "x-terminal-emulator -e mutt %s" },
+    { "vimprobableedit:", "x-terminal-emulator -e vi %s" },
     { "ftp://",           "x-terminal-emulator -e wget ftp://%s" },
     */
 };
@@ -83,6 +85,10 @@ static URIHandler uri_handlers[] = {
 
 /* user styles */
 #define             USER_STYLESHEET             "%s/vimprobable/style.css", config_base
+
+/* user javascript */
+#define             ENABLE_USER_SCRIPTFILE
+#define             USER_SCRIPTFILE             "%s/vimprobable/scripts.js", config_base
 
 /* ssl */
 static gboolean strict_ssl              = TRUE; /* FALSE will accept any SSL certificate at face value */
@@ -138,8 +144,10 @@ Command commands[COMMANDSIZE] = {
     { "bma",                                           	bookmark,         {0} },
     { "bookmark",                                      	bookmark,         {0} },
     { "source",                                        	view_source,      {0} },
+    { "openeditor",                                   	open_editor,      {0} },
     { "set",                                           	browser_settings, {0} },
     { "map",                                           	mappings,         {0} },
+    { "inspect",                                        open_inspector,   {0} },
     { "jumpleft",                                       scroll,           {ScrollJumpTo   | DirectionLeft} },
     { "jumpright",                                      scroll,           {ScrollJumpTo   | DirectionRight} },
     { "jumptop",                                        scroll,           {ScrollJumpTo   | DirectionTop} },
@@ -207,4 +215,5 @@ static Setting browsersettings[] = {
     { "escapeinput",     NULL,               "",                           FALSE,          TRUE,            FALSE,          FALSE  },
     { "strictssl",       NULL,               "",                            FALSE,          TRUE,            FALSE,          FALSE  },
     { "cabundle",        ca_bundle,          "",                            FALSE,          FALSE,           FALSE,          FALSE  },
+    { "tempdir",         temp_dir,           "",                            FALSE,          FALSE,           FALSE,          FALSE  },
 };

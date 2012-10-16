@@ -1,7 +1,8 @@
 TARGET = vimprobable2
 
 # Objectfiles, needed for $(TARGET)
-OBJ = main.o utilities.o callbacks.o
+#OBJ = main.o utilities.o callbacks.o
+OBJ = $(patsubst %.c, %.o, $(wildcard *.c))
 # Manpages
 MAN1 = vimprobable2.1
 MAN5 = vimprobablerc.5
@@ -17,7 +18,7 @@ INSTALL = $(BINDIR)/$(TARGET) $(MANINSTALL)
 # DEBUG build?  Off by default
 V_DEBUG = 0
 
-CFLAGS += `pkg-config --cflags $(LIBS)`
+CFLAGS += `pkg-config --cflags $(LIBS)` -D_XOPEN_SOURCE=500
 LDFLAGS += `pkg-config --libs $(LIBS)` -lX11 -lXext
 
 # TA:  This is a pretty stringent list of warnings to bail on!

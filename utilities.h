@@ -25,7 +25,7 @@ gboolean changemapping(Key *search_key, int maprecord, char *cmd);
 gboolean process_line_arg(const Arg *arg);
 gboolean build_taglist(const Arg *arg, FILE *f);
 void set_error(const char *error);
-void give_feedback(const char *feedback);
+void echo_message(const MessageType type, const char *format, ...);
 Listelement * complete_list(const char *searchfor, const int mode, Listelement *elementlist);
 Listelement * add_list(const char *element, Listelement *elementlist);
 int count_list(Listelement *elementlist);
@@ -35,4 +35,4 @@ char *find_uri_for_searchengine(const char *handle);
 void make_searchengines_list(Searchengine *searchengines, int length);
 void make_uri_handlers_list(URIHandler *uri_handlers, int length);
 gboolean open_handler(char *uri);
-
+gboolean open_handler_pid(char *uri, GPid *child_pid);

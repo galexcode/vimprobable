@@ -49,15 +49,10 @@ process_save_qmark(const char *bm, WebKitWebView *webview)
     char qmarks[10][101];
     char buf[100];
     int  i, mark, l=0;
-    Arg a;
     mark = -1;
     mark = atoi(bm);
-    if ( mark < 1 || mark > 9 ) 
-    {
-	    a.i = Error;
-	    a.s = g_strdup_printf("Invalid quickmark, only 1-9");
-	    echo(&a);
-	    g_free(a.s);
+    if ( mark < 1 || mark > 9 ) {
+	    echo_message(Error, "Invalid quickmark, only 1-9");
 	    return TRUE;
     }	    
     if ( uri == NULL ) return FALSE;
@@ -92,10 +87,7 @@ process_save_qmark(const char *bm, WebKitWebView *webview)
     for( i=0; i < 10; ++i ) 
         fprintf(fp, "%s\n", qmarks[i]);
     fclose(fp);
-    a.i = Error;
-    a.s = g_strdup_printf("Saved as quickmark %d: %s", mark, uri);
-    echo(&a);
-    g_free(a.s);
+    echo_message(Error, "Saved as quickmark %d: %s", mark, uri);
 
     return TRUE;
 }
@@ -269,14 +261,13 @@ void add_modkeys(char key)
     unsigned int k, len;
     extern char *modkeys;
     len = strlen( modkeys );
-    while (k < len )
-    { 
-	if ( modkeys[k] == key ) return;
-	k++;
+    while (k < len ) { 
+        if ( modkeys[k] == key ) return;
+        k++;
     }
-    modkeys = realloc(modkeys, len + 1);
-    modkeys[len++] = key;
-    modkeys[len] = '\0';
+    modkeys = realloc(modkeys, len + 2);
+    modkeys[len] = key;
+    modkeys[len+1] = '\0';
 }
 
 gboolean
@@ -490,14 +481,18 @@ set_error(const char *error) {
     }
 }
 
-void 
-give_feedback(const char *feedback) 
-{ 
-    Arg a = { .i = Info };
+void
+echo_message(const MessageType type, const char *format, ...)
+{
+    Arg a;
+    va_list ap;
 
-    a.s = g_strdup_printf("%s", feedback);
+    va_start(ap, format);
+    a.i = type;
+    a.s = g_strdup_vprintf(format, ap);
     echo(&a);
     g_free(a.s);
+    va_end(ap);
 }
 
 Listelement *
@@ -795,13 +790,22 @@ void make_uri_handlers_list(URIHandler *uri_handlers, int length)
     }
 }
 
+
+/* spawn a child process handling a protocol encoded in URI.
+
+On success, pid will contain the pid of the spawned child.
+If you pass NULL as child_pid, glib will reap the child. */
 gboolean
-open_handler(char *uri) {
+open_handler_pid(char *uri, GPid *child_pid) {
     char *argv[64];
     char *p = NULL, *arg, arg_temp[MAX_SETTING_SIZE], *temp, temp2[MAX_SETTING_SIZE] = "", *temp3;
     int j;
     GList *l;
+    GSpawnFlags flags = G_SPAWN_SEARCH_PATH; 
 
+    if (child_pid) {
+        flags |= G_SPAWN_DO_NOT_REAP_CHILD;
+    }
     p = strchr(uri, ':');
     if (p) {
     	if (dynamic_uri_handlers != NULL) {
@@ -833,7 +837,8 @@ open_handler(char *uri) {
                         	j++;
                     	}
                     	argv[j] =  NULL;
-                    	g_spawn_async(NULL, argv, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, NULL);
+                    	g_spawn_async(NULL, argv, NULL, flags,
+                    	    NULL, NULL, child_pid, NULL);
                 	}
                 	return TRUE;
             	}
@@ -843,3 +848,8 @@ open_handler(char *uri) {
     return FALSE;
 }
 
+
+gboolean
+open_handler(char *uri) {
+    return open_handler_pid(uri, NULL);
+}

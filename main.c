@@ -11,7 +11,10 @@
 */
 
 #include <X11/Xlib.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #include <errno.h>
+#include <stdlib.h>
 #include "includes.h"
 #include "vimprobable.h"
 #include "utilities.h"
@@ -61,7 +64,10 @@ static gboolean complete(const Arg *arg);
 static gboolean descend(const Arg *arg);
 gboolean echo(const Arg *arg);
 static gboolean focus_input(const Arg *arg);
+static gboolean open_editor(const Arg *arg);
+void _resume_from_editor(GPid child_pid, int status, gpointer data);
 static gboolean input(const Arg *arg);
+static gboolean open_inspector(const Arg * arg);
 static gboolean navigate(const Arg *arg);
 static gboolean number(const Arg *arg);
 static gboolean open_arg(const Arg *arg);
@@ -81,6 +87,7 @@ static gboolean view_source(const Arg * arg);
 static gboolean zoom(const Arg *arg);
 static gboolean fake_key_event(const Arg *arg);
 
+static void clear_focus(void);
 static void update_url(const char *uri);
 static void setup_modkeys(void);
 static void setup_gui(void);
@@ -92,6 +99,7 @@ static void jsapi_evaluate_script(const gchar *script, gchar **value, gchar **me
 static void download_progress(WebKitDownload *d, GParamSpec *pspec);
 static void set_widget_font_and_color(GtkWidget *widget, const char *font_str,
                 const char *bg_color_str, const char *fg_color_str);
+static void scripts_run_user_file(void);
 
 static gboolean history(void);
 static gboolean process_set_line(char *line);
@@ -134,7 +142,7 @@ static char current_modkey;
 static char *search_handle;
 static gboolean search_direction;
 static gboolean echo_active = TRUE;
-WebKitWebInspector *inspector;
+static WebKitWebInspector *inspector;
 
 static GdkNativeWindow embed = 0;
 static char *configfile = NULL;
@@ -210,6 +218,7 @@ webview_load_committed_cb(WebKitWebView *webview, WebKitWebFrame *frame, gpointe
     update_url(uri);
     script(&a);
     g_free(a.s);
+    scripts_run_user_file();
 
     if (mode == ModeInsert || mode == ModeHints) {
         Arg a = { .i = ModeNormal };
@@ -222,15 +231,10 @@ void
 webview_load_finished_cb(WebKitWebView *webview, WebKitWebFrame *frame, gpointer user_data) {
     WebKitWebSettings *settings = webkit_web_view_get_settings(webview);
     gboolean scripts;
-    
+
     g_object_get(settings, "enable-scripts", &scripts, NULL);
     if (escape_input_on_load && scripts && !manual_focus && !gtk_widget_is_focus(inputbox)) {
-        Arg a = { .i = Silent, .s = g_strdup("hints.clearFocus();") };
-        script(&a);
-        g_free(a.s);
-        a.i = ModeNormal;
-        a.s = NULL;
-        set(&a);
+        clear_focus();
     }
     if (HISTORY_MAX_ENTRIES > 0)
         history();
@@ -250,6 +254,13 @@ webview_open_js_window_cb(WebKitWebView* temp_view, GParamSpec param_spec) {
 
 static WebKitWebView *
 webview_open_in_new_window_cb(WebKitWebView *webview, WebKitWebFrame *frame, gpointer user_data) {
+    if (rememberedURI != NULL && strlen(rememberedURI) > 0) {
+        if (strncmp(rememberedURI, "javascript:", 11) != 0) {
+            Arg a = { .i = TargetNew, .s = rememberedURI };
+            open_arg(&a);
+            return NULL;
+        }
+    }
     /* create a temporary webview to execute the script in */
     WebKitWebView *temp_view = WEBKIT_WEB_VIEW(webkit_web_view_new());
     /* wait until the new webview receives its new URI */
@@ -304,7 +315,6 @@ webview_download_cb(WebKitWebView *webview, WebKitDownload *download, gpointer u
     const gchar *filename;
     gchar *uri, *path;
     uint32_t size;
-    Arg a;
     WebKitDownloadStatus status;
 
     filename = webkit_download_get_suggested_filename(download);
@@ -316,13 +326,10 @@ webview_download_cb(WebKitWebView *webview, WebKitDownload *download, gpointer u
     webkit_download_set_destination_uri(download, uri);
     g_free(uri);
     size = (uint32_t)webkit_download_get_total_size(download);
-    a.i = Info;
     if (size > 0)
-        a.s = g_strdup_printf("Download %s started (expected size: %u bytes)...", filename, size);
+        echo_message(Info, "Download %s started (expected size: %u bytes)...", filename, size);
     else
-        a.s = g_strdup_printf("Download %s started (unknown size)...", filename);
-    echo(&a);
-    g_free(a.s);
+        echo_message(Info, "Download %s started (unknown size)...", filename);
     activeDownloads = g_list_prepend(activeDownloads, download);
     g_signal_connect(download, "notify::progress", G_CALLBACK(download_progress), NULL);
     g_signal_connect(download, "notify::status", G_CALLBACK(download_progress), NULL);
@@ -340,20 +347,14 @@ blank_cb(void) {
 
 void
 download_progress(WebKitDownload *d, GParamSpec *pspec) {
-    Arg a;
     WebKitDownloadStatus status = webkit_download_get_status(d);
 
     if (status != WEBKIT_DOWNLOAD_STATUS_STARTED && status != WEBKIT_DOWNLOAD_STATUS_CREATED) {
         if (status != WEBKIT_DOWNLOAD_STATUS_FINISHED) {
-            a.i = Error;
-            a.s = g_strdup_printf("Error while downloading %s", webkit_download_get_suggested_filename(d));
-            echo(&a);
+            echo_message(Error, "Error while downloading %s", webkit_download_get_suggested_filename(d));
         } else {
-            a.i = Info;
-            a.s = g_strdup_printf("Download %s finished", webkit_download_get_suggested_filename(d));
-            echo(&a);
+            echo_message(Info, "Download %s finished", webkit_download_get_suggested_filename(d));
         }
-        g_free(a.s);
         activeDownloads = g_list_remove(activeDownloads, d);
     }
     update_state();
@@ -405,9 +406,7 @@ webview_keypress_cb(WebKitWebView *webview, GdkEventKey *event) {
     case ModeNormal:
         if ((CLEAN(event->state) & ~irrelevant) == 0) {
             if (IS_ESCAPE(event)) {
-                a.i = Info;
-                a.s = g_strdup("");
-                echo(&a);
+                echo_message(Info, "");
                 g_free(a.s);
             } else if (current_modkey == 0 && ((event->keyval >= GDK_1 && event->keyval <= GDK_9)
                     || (event->keyval == GDK_0 && count))) {
@@ -432,16 +431,19 @@ webview_keypress_cb(WebKitWebView *webview, GdkEventKey *event) {
             g_free(a.s);
             a.i = ModeNormal;
             return set(&a);
+        } else if (CLEAN(event->state) & GDK_CONTROL_MASK) {
+            /* keybindings of non-printable characters */
+            if (process_keypress(event) == TRUE) return TRUE;
         }
     case ModePassThrough:
         if (IS_ESCAPE(event)) {
-            echo(&a);
+            echo_message(Info, "");
             set(&a);
             return TRUE;
         }
         break;
     case ModeSendKey:
-        echo(&a);
+        echo_message(Info, "");
         set(&a);
         break;
     }
@@ -514,6 +516,11 @@ inputbox_activate_cb(GtkEntry *entry, gpointer user_data) {
     if (length == 0)
         return;
     text = (char*)gtk_entry_get_text(entry);
+
+    /* move focus from inputbox to print potential messages that could not be
+     * printed as long as the inputbox is focused */
+    gtk_widget_grab_focus(GTK_WIDGET(webview));
+
     if (length > 1 && text[0] == ':') {
         success = process_line((text + 1));
     } else if (length > 1 && ((forward = text[0] == '/') || text[0] == '?')) {
@@ -1062,6 +1069,22 @@ echo(const Arg *arg) {
     return TRUE;
 }
 
+static gboolean
+open_inspector(const Arg * arg) {
+    gboolean inspect_enabled;
+    WebKitWebSettings *settings;
+
+    settings = webkit_web_view_get_settings(webview);
+    g_object_get(G_OBJECT(settings), "enable-developer-extras", &inspect_enabled, NULL);
+    if (inspect_enabled) {
+        webkit_web_inspector_show(inspector);
+        return TRUE;
+    } else {
+        echo_message(Error, "Webinspector is not enabled");
+        return FALSE;
+    }
+}
+
 gboolean
 input(const Arg *arg) {
     int pos = 0;
@@ -1275,7 +1298,7 @@ open_remembered(const Arg *arg)
 
 gboolean
 yank(const Arg *arg) {
-    const char *url, *feedback, *content;
+    const char *url, *content;
 
     if (arg->i & SourceSelection) {
         webkit_web_view_copy_clipboard(webview);
@@ -1284,10 +1307,8 @@ yank(const Arg *arg) {
         if (!content && arg->i & ClipboardGTK)
             content = gtk_clipboard_wait_for_text(clipboards[1]);
         if (content) {
-            feedback = g_strconcat("Yanked ", content, NULL);
+            echo_message(Info, "Yanked %s", content);
             g_free((gpointer *)content);
-            give_feedback(feedback);
-            g_free((gpointer *)feedback);
         }
     } else {
         if (arg->i & SourceURL) {
@@ -1297,8 +1318,8 @@ yank(const Arg *arg) {
         }
         if (!url)
             return TRUE;
-        feedback = g_strconcat("Yanked ", url, NULL);
-        give_feedback(feedback);
+
+        echo_message(Info, "Yanked %s", url);
         if (arg->i & ClipboardPrimary)
             gtk_clipboard_set_text(clipboards[0], url, -1);
         if (arg->i & ClipboardGTK)
@@ -1382,7 +1403,6 @@ gboolean
 search(const Arg *arg) {
     count = count ? count : 1;
     gboolean success, direction = arg->i & DirectionPrev;
-    Arg a;
 
     if (arg->s) {
         free(search_handle);
@@ -1400,12 +1420,9 @@ search(const Arg *arg) {
             if (arg->i & Wrapping) {
                 success = webkit_web_view_search_text(webview, search_handle, arg->i & CaseSensitive, direction, TRUE);
                 if (success) {
-                    a.i = Warning;
-                    a.s = g_strdup_printf("search hit %s, continuing at %s",
+                    echo_message(Warning, "search hit %s, continuing at %s",
                             direction ? "BOTTOM" : "TOP",
                             direction ? "TOP" : "BOTTOM");
-                    echo(&a);
-                    g_free(a.s);
                 } else
                     break;
             } else
@@ -1413,18 +1430,13 @@ search(const Arg *arg) {
         }
     } while(--count);
     if (!success) {
-        a.i = Error;
-        a.s = g_strdup_printf("Pattern not found: %s", search_handle);
-        echo(&a);
-        g_free(a.s);
+        echo_message(Error, "Pattern not found: %s", search_handle);
     }
     return TRUE;
 }
 
 gboolean
 set(const Arg *arg) {
-    Arg a = { .i = Info | NoAutoHide };
-
     switch (arg->i) {
     case ModeNormal:
         if (search_handle) {
@@ -1435,19 +1447,13 @@ set(const Arg *arg) {
         gtk_widget_grab_focus(GTK_WIDGET(webview));
         break;
     case ModePassThrough:
-        a.s = g_strdup("-- PASS THROUGH --");
-        echo(&a);
-        g_free(a.s);
+        echo_message(Info | NoAutoHide, "-- PASS THROUGH --");
         break;
     case ModeSendKey:
-        a.s = g_strdup("-- PASS TROUGH (next) --");
-        echo(&a);
-        g_free(a.s);
+        echo_message(Info | NoAutoHide, "-- PASS TROUGH (next) --");
         break;
     case ModeInsert: /* should not be called manually but automatically */
-        a.s = g_strdup("-- INSERT --");
-        echo(&a);
-        g_free(a.s);
+        echo_message(Info | NoAutoHide, "-- INSERT --");
         break;
     default:
         return TRUE;
@@ -1506,15 +1512,12 @@ quickmark(const Arg *a) {
         }
         char *ptr = strrchr(buf, '\n');
         *ptr = '\0';
-        Arg x = { .s = buf };
-        if (strlen(buf)) 
+        if (strlen(buf)) {
+            Arg x = { .s = buf };
             return open_arg(&x);
-        else {       
-            x.i = Error;
-            x.s = g_strdup_printf("Quickmark %d not defined", b);
-            echo(&x);
-            g_free(x.s);
-            return false; 
+        } else {
+            echo_message(Error, "Quickmark %d not defined", b);
+            return false;
         }
     } else { return false; }
 }
@@ -1539,10 +1542,7 @@ script(const Arg *arg) {
     }
     g_free(message);
     if (arg->i != Silent && value) {
-        a.i = arg->i;
-        a.s = g_strdup(value);
-        echo(&a);
-        g_free(a.s);
+        echo_message(arg->i, value);
     }
     /* switch mode according to scripts return value */
     if (value) {
@@ -1631,13 +1631,9 @@ fake_key_event(const Arg *a) {
     if(!embed) {
         return FALSE;
     }
-    Arg err;
-    err.i = Error;
     Display *xdpy;
     if ( (xdpy = XOpenDisplay(NULL)) == NULL ) {
-        err.s = g_strdup("Couldn't find the XDisplay.");
-        echo(&err);
-        g_free(err.s);
+        echo_message(Error, "Couldn't find the XDisplay.");
         return FALSE;
     }
        
@@ -1651,39 +1647,30 @@ fake_key_event(const Arg *a) {
     xk.state =  a->i;
 
     if( ! a->s ) {
-        err.s = g_strdup("Zero pointer as argument! Check your config.h");
-        echo(&err);
-        g_free(err.s);
+        echo_message(Error, "Zero pointer as argument! Check your config.h");
         return FALSE;
     }
 
     KeySym keysym;
     if( (keysym = XStringToKeysym(a->s)) == NoSymbol ) {
-        err.s = g_strdup_printf("Couldn't translate %s to keysym", a->s );
-        echo(&err);
-        g_free(err.s);
+        echo_message(Error, "Couldn't translate %s to keysym", a->s );
         return FALSE;
     }
     
     if( (xk.keycode = XKeysymToKeycode(xdpy, keysym)) == NoSymbol ) {
-        err.s = g_strdup("Couldn't translate keysym to keycode");
-        echo(&err);
-        g_free(err.s);
+        echo_message(Error, "Couldn't translate keysym to keycode");
         return FALSE;
     }
    
     xk.type = KeyPress;
     if( !XSendEvent(xdpy, embed, True, KeyPressMask, (XEvent *)&xk) ) {
-        err.s = g_strdup("XSendEvent failed");
-        echo(&err);
-        g_free(err.s);
+        echo_message(Error, "XSendEvent failed");
         return FALSE;
     }
     XFlush(xdpy);
 
     return TRUE;
 }
-
 
 gboolean
 commandhistoryfetch(const Arg *arg) {
@@ -1729,7 +1716,7 @@ bookmark(const Arg *arg) {
         }
         fprintf(f, "%s", "\n");
         fclose(f);
-        give_feedback( "Bookmark saved" );
+        echo_message(Info, "Bookmark saved");
         return TRUE;
     } else {
     	set_error("Bookmarks file not found.");
@@ -1821,6 +1808,183 @@ view_source(const Arg * arg) {
     return TRUE;
 }
 
+/* open an external editor defined by the protocol handler for
+vimprobableedit on a text box or similar */
+static gboolean
+open_editor(const Arg *arg) {
+    char *text = NULL;
+    gboolean success;
+    GPid child_pid;
+    gchar *value = NULL, *message = NULL, *tag = NULL, *edit_url = NULL;
+    gchar *temp_file_name = g_strdup_printf("%s/vimprobableeditXXXXXX",
+      temp_dir);
+    int temp_file_handle = -1;
+
+    /* check if active element is suitable for text editing */
+    jsapi_evaluate_script("document.activeElement.tagName", &value, &message);
+    if (value == NULL)
+        return FALSE;
+    tag = g_strdup(value);
+    if (strcmp(tag, "INPUT") == 0) {
+        /* extra check: type == text */
+        jsapi_evaluate_script("document.activeElement.type", &value, &message);
+        if (strcmp(value, "text") != 0) {
+            g_free(value);
+            g_free(message);
+            return FALSE;
+        }
+    } else if (strcmp(tag, "TEXTAREA") != 0) {
+        g_free(value);
+        g_free(message);
+        return FALSE;
+    }
+    jsapi_evaluate_script("document.activeElement.value", &value, &message);
+    text = g_strdup(value);
+    if (text == NULL) {
+        g_free(value);
+        g_free(message);
+        return FALSE;
+    }
+
+    /* write text into temporary file */
+    temp_file_handle = mkstemp(temp_file_name);
+    if (temp_file_handle == -1) {
+        message = g_strdup_printf("Could not create temporary file: %s",
+            strerror(errno));
+        echo_message(Error, message);
+        g_free(value);
+        g_free(message);
+        g_free(text);
+        return FALSE;
+    }
+    if (write(temp_file_handle, text, strlen(text)) != strlen(text)) {
+        message = g_strdup_printf("Short write to temporary file: %s",
+            strerror(errno));
+        echo_message(Error, message);
+        g_free(value);
+        g_free(message);
+        g_free(text);
+        return FALSE;
+	}
+    close(temp_file_handle);
+    g_free(text);
+
+    /* spawn editor */
+    edit_url = g_strdup_printf("vimprobableedit:%s", temp_file_name);
+    success = open_handler_pid(edit_url, &child_pid);
+    g_free(edit_url);
+    if (!success) {
+        echo_message(Error, "External editor open failed (no handler for"
+            " vimprobableedit protocol?)");
+        unlink(temp_file_name);
+        g_free(value);
+        g_free(message);
+        return FALSE;
+    }
+   
+    /* mark the active text box as "under processing" */
+    jsapi_evaluate_script(
+        "document.activeElement.disabled = true;"
+        "document.activeElement.originalBackground = "
+        "   document.activeElement.style.background;"
+        "document.activeElement.style.background = '#aaaaaa';"
+        ,&value, &message);
+
+    g_child_watch_add(child_pid, _resume_from_editor, temp_file_name);
+
+    /* temp_file_name is freed in _resume_from_editor */
+    g_free(value);
+    g_free(message);
+    g_free(tag);
+    return TRUE;
+}
+
+
+/* pick up from where open_editor left the work to the glib event loop.
+
+This is called when the external editor exits. 
+
+The data argument points to allocated memory containing the temporary file
+name. */
+void 
+_resume_from_editor(GPid child_pid, int child_status, gpointer data) {
+    FILE *fp;
+    GString *set_value_js = g_string_new(
+        "document.activeElement.value = \"");
+    g_spawn_close_pid(child_pid);
+    gchar *value = NULL, *message = NULL;
+    gchar *temp_file_name = data;
+    gchar buffer[BUF_SIZE] = ""; 
+    gchar *buf_ptr = buffer;
+    int char_read;
+
+    jsapi_evaluate_script(
+        "document.activeElement.disabled = true;"
+        "document.activeElement.style.background = '#aaaaaa';"
+        ,&value, &message);
+
+    if (child_status) {
+        echo_message(Error, "External editor returned with non-zero status,"
+            " discarding edits.");
+        goto error_exit;
+    }
+
+    /* re-read the new contents of the file and put it into the HTML element */
+    if (!access(temp_file_name, R_OK) == 0) {
+        message = g_strdup_printf("Could not access temporary file: %s",
+            strerror(errno));
+        goto error_exit;
+    }
+    fp = fopen(temp_file_name, "r");
+    if (fp == NULL) {
+        /* this would be too weird to even emit an error message */
+        goto error_exit;
+    }
+    jsapi_evaluate_script("document.activeElement.value = '';", 
+        &value, &message);
+
+    while (EOF != (char_read = fgetc(fp))) {
+        if (char_read == '\n') {
+            *buf_ptr++ = '\\';
+            *buf_ptr++ = 'n';
+        } else if (char_read == '"') {
+            *buf_ptr++ = '\\';
+            *buf_ptr++ = '"';
+        } else {
+            *buf_ptr++ = char_read;
+        }
+        /* ship out as the buffer when space gets tight.  This has
+        fuzz to save on thinking, plus we have enough space for the
+        trailing "; in any case. */
+        if (buf_ptr-buffer>=BUF_SIZE-10) {
+            *buf_ptr = 0;
+            g_string_append(set_value_js, buffer);
+            buf_ptr = buffer;
+        }
+    }
+    *buf_ptr++ = '"';
+    *buf_ptr++ = ';';
+    *buf_ptr = 0;
+    g_string_append(set_value_js, buffer);
+    fclose(fp);
+
+    jsapi_evaluate_script(set_value_js->str, &value, &message);
+
+    /* Fall through, error and normal exit are identical */
+error_exit:
+    jsapi_evaluate_script(
+        "document.activeElement.disabled = false;"
+        "document.activeElement.style.background ="
+        "   document.activeElement.originalBackground;"
+        ,&value, &message);
+
+    g_string_free(set_value_js, TRUE);
+    unlink(temp_file_name);
+    g_free(temp_file_name);
+    g_free(value);
+    g_free(message);
+}
+
 static gboolean
 focus_input(const Arg *arg) {
     static Arg a;
@@ -1832,6 +1996,19 @@ focus_input(const Arg *arg) {
     update_state();
     manual_focus = TRUE;
     return TRUE;
+}
+
+static void
+clear_focus(void) {
+    static Arg a;
+
+    a.s = g_strdup("hints.clearFocus();");
+    a.i = Silent;
+    script(&a);
+    g_free(a.s);
+    a.i = ModeNormal;
+    a.s = NULL;
+    set(&a);
 }
 
 static gboolean
@@ -1935,7 +2112,7 @@ process_set_line(char *line) {
                     browsersettings[i].var[MAX_SETTING_SIZE - 1] = '\0';
                     /* in case this string is also used for a webkit setting, make sure it's consistent */
                     my_pair.value[MAX_SETTING_SIZE - 1] = '\0';
-                    give_feedback("String too long; automatically truncated!");
+                    echo_message(Info, "String too long; automatically truncated!");
                 }
             }
             if (strlen(browsersettings[i].webkit) > 0) {
@@ -2027,21 +2204,15 @@ process_line(char *line) {
     g_free(command_hist);
 
     if (!found) {
-        a.i = Error;
-        a.s = g_strdup_printf("Not a browser command: %s", c);
-        echo(&a);
-        g_free(a.s);
+        echo_message(Error, "Not a browser command: %s", c);
     } else if (!success) {
-        a.i = Error;
         if (error_msg != NULL) {
-            a.s = g_strdup_printf("%s", error_msg);
+            echo_message(Error, error_msg);
             g_free(error_msg);
             error_msg = NULL;
         } else {
-            a.s = g_strdup_printf("Unknown error. Please file a bug report!");
+            echo_message(Error, "Unknown error. Please file a bug report!");
         }
-        echo(&a);
-        g_free(a.s);
     }
     return success;
 }
@@ -2455,6 +2626,33 @@ setup_signals() {
         "inspect-web-view",                             G_CALLBACK(inspector_inspect_web_view_cb),   NULL);
 }
 
+#ifdef ENABLE_USER_SCRIPTFILE
+static void
+scripts_run_user_file() {
+    gchar *js = NULL, *user_scriptfile = NULL;
+    GError *error = NULL;
+
+    user_scriptfile = g_strdup_printf(USER_SCRIPTFILE);
+
+    /* run the users script file */
+    if (g_file_test(user_scriptfile, G_FILE_TEST_IS_REGULAR)
+            && g_file_get_contents(user_scriptfile, &js, NULL, &error)) {
+
+        gchar *value = NULL, *message = NULL;
+
+        jsapi_evaluate_script(js, &value, &message);
+        if (message) {
+            fprintf(stderr, "%s", message);
+            g_free(message);
+        }
+    } else {
+        fprintf(stderr, "Cannot open %s: %s\n", user_scriptfile, error ? error->message : "file not found");
+    }
+
+    g_free(user_scriptfile);
+}
+#endif
+
 #ifdef ENABLE_COOKIE_SUPPORT
 void
 setup_cookies()
@@ -2613,6 +2811,11 @@ main(int argc, char *argv[]) {
         return EXIT_SUCCESS;
     }
 
+    if (getenv("TMPDIR")) {
+      strncpy(temp_dir, getenv("TMPDIR"), MAX_SETTING_SIZE);
+      temp_dir[MAX_SETTING_SIZE-1] = 0;
+    }
+
     if( getenv("XDG_CONFIG_HOME") )
         config_base = g_strdup_printf("%s", getenv("XDG_CONFIG_HOME"));
     else
@@ -2649,21 +2852,14 @@ main(int argc, char *argv[]) {
      * command line.
      */
     if (!(access(configfile, F_OK) == 0) && cfile) {
-	    char *feedback_str;
-
-	    feedback_str = g_strdup_printf("Config file '%s' doesn't exist", cfile);
-	    give_feedback(feedback_str);
-        g_free(feedback_str);
+        echo_message(Info, "Config file '%s' doesn't exist", cfile);
     } else if ((access(configfile, F_OK) == 0))
 	    configfile_exists = true;
 
     /* read config file */
     /* But only report errors if we failed, and the file existed. */
     if ((SUCCESS != read_rcfile(configfile)) && configfile_exists) {
-        a.i = Error;
-        a.s = g_strdup_printf("Error in config file '%s'", configfile);
-        echo(&a);
-        g_free(a.s);
+        echo_message(Error, "Error in config file '%s'", configfile);
         g_free(configfile);
     }
 
