@@ -1,7 +1,7 @@
 .\" Process this file with
 .\" groff -man -Tascii vimprobablerc.5
 .\"
-.TH VIMPROBABLERC 5 "FEBRUARY 2012" "Linux User Manuals"
+.TH VIMPROBABLERC 5 "JANUARY 2014" "Linux User Manuals"
 .SH NAME
 vimprobablerc \- The configuration file for Vimprobable
 .SH DESCRIPTION
@@ -90,6 +90,12 @@ Enable or disable autoload of images.
 .IP shrinkimages=[true|false]  
 Enable or disable autoshrink of images.
 
+.IP completionfontnormal=font
+Font used in the tab completion list.
+
+.IP completionfonterror=font
+Font used in the tab completion list for errors.
+
 .IP cursivefont=cursivefont-family
 Replace the default cursive font family
 
@@ -101,6 +107,9 @@ Replace the default font family
 
 .IP defaultsearch=searchengine-shortcut
 Replace the default search engine
+
+.IP downloadspath=/path/to/downloaded/files
+Absolute path on the local file system to download files to (default: $HOME)
 
 .IP escapeinput=[true|false]
 Ignore automatic focusing of input elements by websites on load.
@@ -141,6 +150,9 @@ Enable or disable scrollbars.
 .IP statusbar=[true|false]
 Show or hide the status bar.
 
+.IP statusfont=font
+Dont used in the status bar.
+
 .IP inputbox=[true|false]
 Show or hide the input box.
 
@@ -149,6 +161,15 @@ Replace the default serif font family
 
 .IP stylesheet=URL
 Replace the user stylesheet
+
+.IP urlboxfontnormal=font
+Font used in the URL box.
+
+.IP urlboxfontwarning=font
+Font used in the URL box for warnings.
+
+.IP urlboxfonterror=font
+Font used in the URL box for errors.
 
 .IP webinspector=[true|false]
 Enable or disable webinspector
