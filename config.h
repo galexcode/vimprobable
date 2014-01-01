@@ -10,7 +10,7 @@
 */
 
 /* Vimprobable version number */
-#define VERSION "1.4.0"
+#define VERSION "1.4.1"
 #define INTERNAL_VERSION "Vimprobable2/"VERSION
 
 extern Client client;
