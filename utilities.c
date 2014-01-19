@@ -193,7 +193,7 @@ process_line_arg(const Arg *arg) {
 
 gboolean
 changemapping(Key *search_key, int maprecord, char *cmd) {
-    KeyList *current, *newkey;
+    KeyList *current, *newkey, *prev = NULL;
     Arg a = { .s = cmd };
 
     /* sanity check */
@@ -225,6 +225,7 @@ changemapping(Key *search_key, int maprecord, char *cmd) {
             }
             return TRUE;
         }
+        prev = current;
         current = current->next;
     }
 
@@ -252,8 +253,8 @@ changemapping(Key *search_key, int maprecord, char *cmd) {
     if (client.config.keylistroot == NULL)
         client.config.keylistroot = newkey;
 
-    if (current != NULL)
-        current->next = newkey;
+    if (prev != NULL)
+        prev->next = newkey;
 
     return TRUE;
 }
